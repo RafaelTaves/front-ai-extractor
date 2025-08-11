@@ -54,7 +54,7 @@ export default function FileProcessorPage() {
   useEffect(() => {
     const fetchPrompts = async () => {
       try {
-        const response = await axios.get(`${BASE_URL}/prompts_read_list`, {
+        const response = await axios.get(`${process.env.NEXT_PUBLIC_API_URL}/prompts_read_list`, {
           headers: {
             'Authorization': `Bearer ${localStorage.getItem('token')}`
           }
@@ -160,7 +160,7 @@ export default function FileProcessorPage() {
     form.append('prompt', promptText);         // string
     form.append('api_key', apiKey);            // string
 
-    const response = await axios.post(`${BASE_URL}/extract_data`, form, {
+    const response = await axios.post(`${process.env.NEXT_PUBLIC_API_URL}/extract_data`, form, {
       headers: {
         Authorization: `Bearer ${token}`,
       },
