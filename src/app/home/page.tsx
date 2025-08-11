@@ -1,28 +1,81 @@
 'use client'
 
-import React, { useState, useCallback } from 'react'
-import { Upload, Download, Copy, FileText, Image, Check, X } from 'lucide-react'
+import React, { useState, useCallback, useEffect } from 'react'
+import { Upload, Download, Copy, FileText, Image, Check, X, Key, Eye, EyeOff, Shield } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
 import { toast } from 'sonner'
+import axios from 'axios'
+import { Input } from '@/components/ui/input'
+import { useRouter } from 'next/navigation';
 
-// Simulação das chaves de API (substitua pelos seus dados reais)
-const API_KEYS = [
-  { id: 'openai', label: 'OpenAI GPT-4', description: 'Análise avançada de documentos' },
-  { id: 'claude', label: 'Claude 3', description: 'Processamento de texto e imagens' },
-  { id: 'gemini', label: 'Google Gemini', description: 'Análise multimodal' },
-  { id: 'azure', label: 'Azure AI', description: 'Serviços cognitivos Microsoft' },
-]
+interface Prompt {
+  id_prompt: number;
+  chave: string;
+  texto: string;
+}
+
+const BASE_URL = "http://127.0.0.1:8000"
 
 export default function FileProcessorPage() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
-  const [selectedKey, setSelectedKey] = useState<string>('')
+  const [prompts, setPrompts] = useState<Prompt[]>([])
+  const [selectedPrompt, setSelectedPrompt] = useState<number>(0)
+  const [apiKey, setApiKey] = useState<string>('')
+  const [showApiKey, setShowApiKey] = useState(false)
   const [isProcessing, setIsProcessing] = useState(false)
   const [result, setResult] = useState<any>(null)
   const [isDragOver, setIsDragOver] = useState(false)
+  const [loading, setLoading] = useState(true);
+  const router = useRouter();
+
+  useEffect(() => {
+    const verifyToken = async () => {
+      const token = localStorage.getItem('token');
+      try {
+        const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/verify-token/${token}`);
+
+        if (!response.ok) {
+          throw new Error('Token verification failed');
+        }
+        setLoading(false)
+      } catch (error) {
+        localStorage.removeItem('token');
+        router.push('/');
+      }
+    };
+
+    verifyToken();
+  }, [router]);
+
+  useEffect(() => {
+    const fetchPrompts = async () => {
+      try {
+        const response = await axios.get(`${BASE_URL}/prompts_read_list`, {
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('token')}`
+          }
+        }
+        );
+        console.log("Prompts response:", response.data);
+        setPrompts(response.data);
+        if (response.data.length > 0) {
+          setSelectedPrompt(response.data[0].id); // Seleciona o primeiro prompt por padrão
+        }
+      } catch (error) {
+        toast.error('Erro ao carregar prompts', {
+          description: 'Não foi possível carregar os prompts disponíveis.'
+        });
+      }
+    };
+
+    fetchPrompts();
+  }, []);
+
+  
 
   // Função para lidar com arquivos selecionados via input
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -36,7 +89,7 @@ export default function FileProcessorPage() {
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault()
     setIsDragOver(false)
-    
+
     const files = Array.from(e.dataTransfer.files)
     if (files.length > 0) {
       processSelectedFile(files[0])
@@ -51,7 +104,9 @@ export default function FileProcessorPage() {
       'image/jpg',
       'image/png',
       'image/gif',
-      'image/webp'
+      'image/webp',
+      'image/tiff',
+      'image/tif'
     ]
 
     if (!validTypes.includes(file.type)) {
@@ -84,54 +139,54 @@ export default function FileProcessorPage() {
   }, [])
 
   const handleProcess = async () => {
-    if (!selectedFile || !selectedKey) {
-      toast.error('Dados incompletos', {
-        description: 'Selecione um arquivo e uma chave de API'
-      })
-      return
-    }
+  const token = localStorage.getItem('token');
 
-    setIsProcessing(true)
+  if (!selectedFile || !selectedPrompt || !apiKey) {
+    toast.error('Dados incompletos', {
+      description: 'Selecione um arquivo, um prompt e informe a chave de API.'
+    });
+    return;
+  }
 
-    try {
-      // Simular processamento (substitua pela sua lógica de API)
-      await new Promise(resolve => setTimeout(resolve, 2000))
-      
-      // Resultado simulado (substitua pelo resultado real da sua API)
-      const mockResult = {
-        file: {
-          name: selectedFile.name,
-          size: selectedFile.size,
-          type: selectedFile.type,
-          lastModified: selectedFile.lastModified
-        },
-        apiKey: selectedKey,
-        processedAt: new Date().toISOString(),
-        analysis: {
-          content: "Conteúdo extraído do arquivo...",
-          entities: ["Entidade 1", "Entidade 2", "Entidade 3"],
-          summary: "Resumo do documento processado...",
-          confidence: 0.95
-        },
-        metadata: {
-          pages: 5,
-          language: "pt-BR",
-          processingTime: "2.3s"
-        }
-      }
+  setIsProcessing(true);
 
-      setResult(mockResult)
+  try {
+    const promptText =
+      prompts.find(p => p.id_prompt === selectedPrompt)?.texto ?? '';
+
+    // Monta o multipart/form-data
+    const form = new FormData();
+    form.append('file', selectedFile);         // File ou Blob vindo do <input type="file">
+    form.append('prompt', promptText);         // string
+    form.append('api_key', apiKey);            // string
+
+    const response = await axios.post(`${BASE_URL}/extract_data`, form, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+
+    if (response.status === 200) {
+      setResult(response.data);
       toast.success('Processamento concluído!', {
         description: 'O arquivo foi analisado com sucesso'
-      })
-    } catch (error) {
+      });
+    } else {
       toast.error('Erro no processamento', {
-        description: 'Ocorreu um erro ao processar o arquivo. Tente novamente.'
-      })
-    } finally {
-      setIsProcessing(false)
+        description: `Resposta inesperada (${response.status}).`
+      });
     }
+  } catch (err: any) {
+    const desc =
+      err?.response?.data?.message ||
+      err?.response?.data ||
+      err?.message ||
+      'Ocorreu um erro ao processar o arquivo. Tente novamente.';
+    toast.error('Erro no processamento', { description: String(desc) });
+  } finally {
+    setIsProcessing(false);
   }
+};
 
   const copyToClipboard = () => {
     if (result) {
@@ -180,6 +235,10 @@ export default function FileProcessorPage() {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
   }
 
+  if (loading) {
+    return <div>{null}</div>;
+  }
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 p-4">
       <div className="max-w-6xl mx-auto space-y-6">
@@ -208,11 +267,10 @@ export default function FileProcessorPage() {
             <CardContent className="space-y-4">
               {/* Drop Zone */}
               <div
-                className={`border-2 border-dashed rounded-lg p-8 text-center transition-all duration-200 ${
-                  isDragOver
-                    ? 'border-blue-500 bg-blue-50'
-                    : 'border-slate-300 hover:border-slate-400'
-                }`}
+                className={`border-2 border-dashed rounded-lg p-8 text-center transition-all duration-200 ${isDragOver
+                  ? 'border-blue-500 bg-blue-50'
+                  : 'border-slate-300 hover:border-slate-400'
+                  }`}
                 onDrop={handleDrop}
                 onDragOver={handleDragOver}
                 onDragLeave={handleDragLeave}
@@ -234,7 +292,7 @@ export default function FileProcessorPage() {
                   />
                 </label>
                 <p className="text-xs text-slate-500 mt-2">
-                  PDF, JPEG, PNG, GIF, WebP (máx. 10MB)
+                  PDF, JPEG, PNG, TIFF, WebP (máx. 10MB)
                 </p>
               </div>
 
@@ -278,57 +336,128 @@ export default function FileProcessorPage() {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <Select value={selectedKey} onValueChange={setSelectedKey}>
+              <Select
+                value={selectedPrompt?.toString()}
+                onValueChange={(value) => setSelectedPrompt(Number(value))}
+              >
                 <SelectTrigger>
                   <SelectValue placeholder="Selecione um prompt" />
                 </SelectTrigger>
                 <SelectContent>
-                  {API_KEYS.map((key) => (
-                    <SelectItem key={key.id} value={key.id}>
+                  {prompts.map((prompt) => (
+                    <SelectItem key={prompt.id_prompt} value={prompt.id_prompt.toString()}>
                       <div className="flex flex-col">
-                        <span className="font-medium">{key.label}</span>
-                        <span className="text-xs text-slate-500">
-                          {key.description}
-                        </span>
+                        <span className="font-medium">{prompt.chave}</span>
+                        {/* <span className="text-xs text-slate-500">
+                          {prompt.texto}
+                        </span> */}
                       </div>
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
 
-              {selectedKey && (
+              {selectedPrompt && (
                 <Card className="border border-blue-200 bg-blue-50">
                   <CardContent className="p-3">
                     <div className="flex items-center gap-2">
                       <Badge variant="secondary">Selecionado</Badge>
                       <span className="text-sm font-medium">
-                        {API_KEYS.find(k => k.id === selectedKey)?.label}
+                        {prompts.find((k) => k.id_prompt === selectedPrompt)?.chave}
                       </span>
                     </div>
                   </CardContent>
                 </Card>
               )}
+            </CardContent>
+          </Card>
 
-              <Separator />
+          {/* API Key Input */}
+          <Card className="shadow-lg border-0 bg-white/80 backdrop-blur">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Key className="h-5 w-5" />
+                Chave da API
+              </CardTitle>
+              <CardDescription>
+                Insira sua chave de API para processar o arquivo. Suas informações são seguras e não são armazenadas.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="relative">
+                <Input
+                  type={showApiKey ? 'text' : 'password'}
+                  placeholder="sk-..."
+                  value={apiKey}
+                  onChange={(e) => setApiKey(e.target.value)}
+                  className="pr-20"
+                />
+                <div className="absolute inset-y-0 right-0 flex items-center gap-1 pr-3">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setShowApiKey(!showApiKey)}
+                    className="h-7 w-7 p-0"
+                  >
+                    {showApiKey ? (
+                      <EyeOff className="h-4 w-4" />
+                    ) : (
+                      <Eye className="h-4 w-4" />
+                    )}
+                  </Button>
+                </div>
+              </div>
 
-              <Button
-                onClick={handleProcess}
-                disabled={!selectedFile || !selectedKey || isProcessing}
-                className="w-full bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700"
-                size="lg"
-              >
-                {isProcessing ? (
-                  <>
-                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2" />
-                    Processando...
-                  </>
-                ) : (
-                  'Processar Arquivo'
-                )}
-              </Button>
+              {apiKey && (
+                <div className="flex items-center gap-2 text-sm">
+                  <div className="flex items-center gap-1 text-green-600">
+                    <Check className="h-4 w-4" />
+                    <span>Chave inserida</span>
+                  </div>
+                  <Badge variant="outline" className="text-xs">
+                    {apiKey.length} caracteres
+                  </Badge>
+                </div>
+              )}
+
+              <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+                <div className="flex items-start gap-2">
+                  <Shield className="h-4 w-4 text-amber-600 mt-0.5 flex-shrink-0" />
+                  <div className="text-xs text-amber-800">
+                    <p className="font-medium mb-1">Segurança garantida</p>
+                    <p>
+                      Sua chave de API é processada localmente e não é armazenada
+                      em nossos servidores.
+                    </p>
+                  </div>
+                </div>
+              </div>
             </CardContent>
           </Card>
         </div>
+
+        <Separator />
+
+        <Button
+          onClick={handleProcess}
+          disabled={
+            !selectedFile || !selectedPrompt || !apiKey || isProcessing
+          }
+          className="w-full bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700"
+        >
+          {isProcessing ? (
+            <>
+              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2" />
+              Processando...
+            </>
+          ) : (
+            <>
+              <Upload className="mr-2 h-4 w-4" />
+              Processar Arquivo
+            </>
+          )}
+        </Button>
 
         {/* Results Section */}
         {result && (
@@ -377,5 +506,6 @@ export default function FileProcessorPage() {
         )}
       </div>
     </div>
-  )
+  );
+
 }

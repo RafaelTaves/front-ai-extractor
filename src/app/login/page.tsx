@@ -15,36 +15,40 @@ import { Eye, EyeOff } from "lucide-react"
 import { toast } from "sonner"
 import axios from "axios"
 
+const BASE_URL = "http://127.0.0.1:8000"
 
 export default function Login() {
   const [showPassword, setShowPassword] = useState(false)
   const [loading, setLoading] = useState(false);
-  const [email, setEmail] = useState("");
+  const [user, setUser] = useState("");
   const [password, setPassword] = useState("");
 
-  const handleLogin = async () => {
+  const handleLogin = async (event: any) => {
+    event.preventDefault();
     setLoading(true);
 
+    const formDetails = new URLSearchParams();
+        formDetails.append('grant_type', 'password');
+        formDetails.append('username', user);
+        formDetails.append('password', password);
+        formDetails.append('scope', '');
+        formDetails.append('client_id', '');
+        formDetails.append('client_secret', '');
+
     try {
-      const response = await axios.post(`${process.env.NEXT_PUBLIC_API_URL}/login`, 
-        {
-          username: email,
-          password: password,
+      const response = await axios.post(`${process.env.NEXT_PUBLIC_API_URL}/login`, formDetails, {
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
         },
-        {
-          headers: {
-            'Content-Type': 'application/json',
-            'Accept': 'application/json',
-          },
       });
 
-      if (response.status !== 200 || response.data.status === false) {
+      console.log("Login response:", response.data);
+      if (response.status !== 200) {
         console.log("Credenciais inválidas!");
         throw new Error("Credenciais inválidas!");
       }
 
-      localStorage.setItem("token", response.data.data.token);
-      localStorage.setItem("refreshToken", response.data.data.refreshToken);
+      localStorage.setItem("token", response.data.access_token);
 
       toast.success("Login realizado!", {
         description: "Redirecionando para seleção de local...",
@@ -52,11 +56,11 @@ export default function Login() {
       });
 
       setTimeout(() => {
-        window.location.href = "/local";
+        window.location.href = "/home";
       }, 1000);
     } catch {
       toast.error("Erro no login", {
-        description: "E-mail ou senha incorretos!",
+        description: "Usuario ou senha incorretos!",
         duration: 3000,
       });
     } finally {
@@ -77,12 +81,12 @@ export default function Login() {
           <form>
             <div className="flex flex-col gap-6">
               <div className="grid gap-2">
-                <Label htmlFor="email" className="text-primaria">Email</Label>
+                <Label htmlFor="user" className="text-primaria">user</Label>
                 <Input
-                  id="email"
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
+                  id="user"
+                  type="user"
+                  value={user}
+                  onChange={(e) => setUser(e.target.value)}
                   required
                 />
               </div>
