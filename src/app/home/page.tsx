@@ -1,7 +1,7 @@
 'use client'
 
 import React, { useState, useCallback, useEffect } from 'react'
-import { Upload, Download, Copy, FileText, Image, Check, X, Key, Eye, EyeOff, Shield } from 'lucide-react'
+import { Upload, Download, Copy, FileText, Image, Check, X, Key, Eye, EyeOff, Shield, Save } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -11,14 +11,16 @@ import { toast } from 'sonner'
 import axios from 'axios'
 import { Input } from '@/components/ui/input'
 import { useRouter } from 'next/navigation';
+import { Textarea } from "@/components/ui/textarea"
+import { Label } from "@/components/ui/label"
+import { updatePrompt } from '@/lib/api'
+import Navbar from '@/components/Navbar'
 
 interface Prompt {
   id_prompt: number;
   chave: string;
   texto: string;
 }
-
-const BASE_URL = "http://127.0.0.1:8000"
 
 export default function FileProcessorPage() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
@@ -31,6 +33,7 @@ export default function FileProcessorPage() {
   const [isDragOver, setIsDragOver] = useState(false)
   const [loading, setLoading] = useState(true);
   const router = useRouter();
+  const [currentPromptText, setCurrentPromptText] = useState<string>("")
 
   useEffect(() => {
     const verifyToken = async () => {
@@ -53,6 +56,7 @@ export default function FileProcessorPage() {
 
   useEffect(() => {
     const fetchPrompts = async () => {
+      if(loading === true) return;
       try {
         const response = await axios.get(`${process.env.NEXT_PUBLIC_API_URL}/prompts_read_list`, {
           headers: {
@@ -73,9 +77,16 @@ export default function FileProcessorPage() {
     };
 
     fetchPrompts();
-  }, []);
+  }, [loading]);
 
-  
+  useEffect(() => {
+    if (selectedPrompt) {
+      const prompt = prompts.find(p => p.id_prompt === selectedPrompt)
+      setCurrentPromptText(prompt?.texto || "")
+    } else {
+      setCurrentPromptText("")
+    }
+  }, [selectedPrompt, prompts])
 
   // Função para lidar com arquivos selecionados via input
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -106,7 +117,9 @@ export default function FileProcessorPage() {
       'image/gif',
       'image/webp',
       'image/tiff',
-      'image/tif'
+      'image/tif',
+      'application/msword',                    // Para arquivos .doc
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document'  // Para arquivos .docx
     ]
 
     if (!validTypes.includes(file.type)) {
@@ -139,54 +152,51 @@ export default function FileProcessorPage() {
   }, [])
 
   const handleProcess = async () => {
-  const token = localStorage.getItem('token');
+    const token = localStorage.getItem('token');
 
-  if (!selectedFile || !selectedPrompt || !apiKey) {
-    toast.error('Dados incompletos', {
-      description: 'Selecione um arquivo, um prompt e informe a chave de API.'
-    });
-    return;
-  }
-
-  setIsProcessing(true);
-
-  try {
-    const promptText =
-      prompts.find(p => p.id_prompt === selectedPrompt)?.texto ?? '';
-
-    // Monta o multipart/form-data
-    const form = new FormData();
-    form.append('file', selectedFile);         // File ou Blob vindo do <input type="file">
-    form.append('prompt', promptText);         // string
-    form.append('api_key', apiKey);            // string
-
-    const response = await axios.post(`${process.env.NEXT_PUBLIC_API_URL}/extract_data`, form, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    });
-
-    if (response.status === 200) {
-      setResult(response.data);
-      toast.success('Processamento concluído!', {
-        description: 'O arquivo foi analisado com sucesso'
+    if (!selectedFile || !selectedPrompt || !apiKey) {
+      toast.error('Dados incompletos', {
+        description: 'Selecione um arquivo, um prompt e informe a chave de API.'
       });
-    } else {
-      toast.error('Erro no processamento', {
-        description: `Resposta inesperada (${response.status}).`
-      });
+      return;
     }
-  } catch (err: any) {
-    const desc =
-      err?.response?.data?.message ||
-      err?.response?.data ||
-      err?.message ||
-      'Ocorreu um erro ao processar o arquivo. Tente novamente.';
-    toast.error('Erro no processamento', { description: String(desc) });
-  } finally {
-    setIsProcessing(false);
-  }
-};
+
+    setIsProcessing(true);
+
+    try {
+      // Monta o multipart/form-data
+      const form = new FormData();
+      form.append('file', selectedFile);         // File ou Blob vindo do <input type="file">
+      form.append('prompt', currentPromptText);         // string
+      form.append('api_key', apiKey);            // string
+
+      const response = await axios.post(`${process.env.NEXT_PUBLIC_API_URL}/extract_data`, form, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      if (response.status === 200) {
+        setResult(response.data);
+        toast.success('Processamento concluído!', {
+          description: 'O arquivo foi analisado com sucesso'
+        });
+      } else {
+        toast.error('Erro no processamento', {
+          description: `Resposta inesperada (${response.status}).`
+        });
+      }
+    } catch (err: any) {
+      const desc =
+        err?.response?.data?.message ||
+        err?.response?.data ||
+        err?.message ||
+        'Ocorreu um erro ao processar o arquivo. Tente novamente.';
+      toast.error('Erro no processamento', { description: String(desc) });
+    } finally {
+      setIsProcessing(false);
+    }
+  };
 
   const copyToClipboard = () => {
     if (result) {
@@ -235,6 +245,22 @@ export default function FileProcessorPage() {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
   }
 
+  async function handleSaveEditingPrompt() {
+    const promptKey =
+      prompts.find(p => p.id_prompt === selectedPrompt)?.chave ?? '';
+    const updatedData = {
+      chave: promptKey,
+      texto: currentPromptText
+    }
+    try {
+      await updatePrompt(selectedPrompt, updatedData);
+      toast.success('Sucesso!', { description: 'Prompt atualizado com sucesso.' });
+    } catch (err) {
+      console.error('Erro ao atualizar prompt:', err);
+      toast.error('Erro', { description: 'Falha ao atualizar prompt.' });
+    }
+  }
+
   if (loading) {
     return <div>{null}</div>;
   }
@@ -243,6 +269,7 @@ export default function FileProcessorPage() {
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 p-4">
       <div className="max-w-6xl mx-auto space-y-6">
         {/* Header */}
+        <Navbar />
         <div className="text-center space-y-2">
           <h1 className="text-4xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
             Processador de Arquivos
@@ -277,9 +304,9 @@ export default function FileProcessorPage() {
               >
                 <Upload className="h-12 w-12 text-slate-400 mx-auto mb-4" />
                 <p className="text-slate-600 mb-2">
-                  Arraste e solte um arquivo aqui ou
+                  Arraste e solte um arquivo aqui 
                 </p>
-                <label htmlFor="file-upload">
+                {/* <label htmlFor="file-upload">
                   <Button variant="outline" className="cursor-pointer">
                     Selecionar arquivo
                   </Button>
@@ -290,7 +317,7 @@ export default function FileProcessorPage() {
                     onChange={handleFileSelect}
                     className="hidden"
                   />
-                </label>
+                </label> */}
                 <p className="text-xs text-slate-500 mt-2">
                   PDF, JPEG, PNG, TIFF, WebP (máx. 10MB)
                 </p>
@@ -327,7 +354,7 @@ export default function FileProcessorPage() {
             </CardContent>
           </Card>
 
-          {/* API Key Selection */}
+          {/* Prompt Selection */}
           <Card className="shadow-lg border-0 bg-white/80 backdrop-blur">
             <CardHeader>
               <CardTitle>Prompt</CardTitle>
@@ -348,9 +375,6 @@ export default function FileProcessorPage() {
                     <SelectItem key={prompt.id_prompt} value={prompt.id_prompt.toString()}>
                       <div className="flex flex-col">
                         <span className="font-medium">{prompt.chave}</span>
-                        {/* <span className="text-xs text-slate-500">
-                          {prompt.texto}
-                        </span> */}
                       </div>
                     </SelectItem>
                   ))}
@@ -358,16 +382,42 @@ export default function FileProcessorPage() {
               </Select>
 
               {selectedPrompt && (
-                <Card className="border border-blue-200 bg-blue-50">
-                  <CardContent className="p-3">
-                    <div className="flex items-center gap-2">
-                      <Badge variant="secondary">Selecionado</Badge>
-                      <span className="text-sm font-medium">
-                        {prompts.find((k) => k.id_prompt === selectedPrompt)?.chave}
-                      </span>
+                <>
+                  <Card className="border border-blue-200 bg-blue-50">
+                    <CardContent className="p-3">
+                      <div className="flex items-center gap-2">
+                        <Badge variant="secondary">Selecionado</Badge>
+                        <span className="text-sm font-medium">
+                          {prompts.find((k) => k.id_prompt === selectedPrompt)?.chave}
+                        </span>
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  {/* Editor de Prompt */}
+                  <div className="space-y-3">
+                    <Label htmlFor="prompt-editor" className="text-sm font-medium">
+                      Editar Prompt
+                    </Label>
+                    <Textarea
+                      id="prompt-editor"
+                      placeholder="Digite ou edite o prompt aqui..."
+                      value={currentPromptText}
+                      onChange={(e) => setCurrentPromptText(e.target.value)}
+                      className="min-h-[120px] resize-none"
+                    />
+                    <div className="flex justify-end">
+                      <Button
+                        onClick={handleSaveEditingPrompt}
+                        disabled={!currentPromptText.trim()}
+                        className="flex items-center gap-2"
+                      >
+                        <Save className="h-4 w-4" />
+                        Salvar Prompt
+                      </Button>
                     </div>
-                  </CardContent>
-                </Card>
+                  </div>
+                </>
               )}
             </CardContent>
           </Card>

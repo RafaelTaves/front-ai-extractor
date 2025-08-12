@@ -15,8 +15,6 @@ import { Eye, EyeOff } from "lucide-react"
 import { toast } from "sonner"
 import axios from "axios"
 
-const BASE_URL = "http://127.0.0.1:8000"
-
 export default function Login() {
   const [showPassword, setShowPassword] = useState(false)
   const [loading, setLoading] = useState(false);
