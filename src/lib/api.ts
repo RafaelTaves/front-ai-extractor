@@ -45,3 +45,24 @@ export const updatePrompt = async (id: number, payload: Partial<Omit<Prompt, 'id
 export const deletePrompt = async (id: number) => {
   await api.delete(`/prompts_delete/${id}`);
 };
+
+export const convertCSV = async (jsonData: object | object[]): Promise<string> => {
+
+  const requestBody = {
+    json_data: jsonData
+  };
+
+  try {
+    const { data } = await api.post<string>('/json-to-csv', requestBody, {
+      responseType: 'text',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+
+    return data;
+  } catch (error) {
+    console.error('Erro ao converter JSON para CSV:', error);
+    throw error;
+  }
+};
