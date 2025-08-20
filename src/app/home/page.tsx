@@ -40,42 +40,32 @@ export default function FileProcessorPage() {
       const token = localStorage.getItem('token');
       try {
         const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/verify-token/${token}`);
-
-        if (!response.ok) {
-          throw new Error('Token verification failed');
-        }
+        if (!response.ok) throw new Error('Token verification failed');
         setLoading(false)
       } catch (error) {
         localStorage.removeItem('token');
         router.push('/');
       }
     };
-
     verifyToken();
   }, [router]);
 
   useEffect(() => {
     const fetchPrompts = async () => {
-      if(loading === true) return;
+      if (loading) return;
       try {
         const response = await axios.get(`${process.env.NEXT_PUBLIC_API_URL}/prompts_read_list`, {
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('token')}`
-          }
-        }
-        );
-        console.log("Prompts response:", response.data);
+          headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+        });
         setPrompts(response.data);
         if (response.data.length > 0) {
-          setSelectedPrompt(response.data[0].id); // Seleciona o primeiro prompt por padrão
+          // FIX: usa id_prompt
+          setSelectedPrompt(response.data[0].id_prompt);
         }
-      } catch (error) {
-        toast.error('Erro ao carregar prompts', {
-          description: 'Não foi possível carregar os prompts disponíveis.'
-        });
+      } catch {
+        toast.error('Erro ao carregar prompts', { description: 'Não foi possível carregar os prompts disponíveis.' });
       }
     };
-
     fetchPrompts();
   }, [loading]);
 
@@ -88,28 +78,35 @@ export default function FileProcessorPage() {
     }
   }, [selectedPrompt, prompts])
 
-  // Função para lidar com arquivos selecionados via input
+  const isZipFile = (file: File) => {
+    const type = (file.type || '').toLowerCase();
+    const name = (file.name || '').toLowerCase();
+    return (
+      type === 'application/zip' ||
+      type === 'application/x-zip-compressed' ||
+      name.endsWith('.zip')
+    );
+  };
+
+  // input file (se usar)
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
-    if (file) {
-      processSelectedFile(file)
-    }
+    if (file) processSelectedFile(file)
   }
 
-  // Função para lidar com arquivos via drag and drop
+  // drag & drop
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault()
     setIsDragOver(false)
-
     const files = Array.from(e.dataTransfer.files)
-    if (files.length > 0) {
-      processSelectedFile(files[0])
-    }
+    if (files.length > 0) processSelectedFile(files[0])
   }, [])
 
-  // Função centralizada para processar arquivo selecionado
   const processSelectedFile = (file: File) => {
-    const validTypes = [
+    const isZip = isZipFile(file)
+
+    // Tipos aceitos para doc/imagem
+    const validDocTypes = new Set([
       'application/pdf',
       'image/jpeg',
       'image/jpg',
@@ -118,20 +115,23 @@ export default function FileProcessorPage() {
       'image/webp',
       'image/tiff',
       'image/tif',
-      'application/msword',                    // Para arquivos .doc
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document'  // Para arquivos .docx
-    ]
+      'application/msword',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+    ])
 
-    if (!validTypes.includes(file.type)) {
+    // tamanho máximo (10MB docs/imagens; 50MB ZIP)
+    const maxSize = isZip ? 50 * 1024 * 1024 : 10 * 1024 * 1024
+
+    if (!isZip && !validDocTypes.has(file.type)) {
       toast.error('Tipo de arquivo não suportado', {
-        description: 'Por favor, selecione um PDF ou uma imagem (JPEG, PNG, GIF, WebP)'
+        description: 'Envie PDF, imagem (JPEG, PNG, GIF, WebP, TIFF) ou ZIP.'
       })
       return
     }
 
-    if (file.size > 10 * 1024 * 1024) { // 10MB
+    if (file.size > maxSize) {
       toast.error('Arquivo muito grande', {
-        description: 'O arquivo deve ter no máximo 10MB'
+        description: isZip ? 'ZIP deve ter no máximo 50MB' : 'Documento deve ter no máximo 10MB'
       })
       return
     }
@@ -164,22 +164,25 @@ export default function FileProcessorPage() {
     setIsProcessing(true);
 
     try {
-      // Monta o multipart/form-data
       const form = new FormData();
-      form.append('file', selectedFile);         // File ou Blob vindo do <input type="file">
-      form.append('prompt', currentPromptText);         // string
-      form.append('api_key', apiKey);            // string
+      form.append('file', selectedFile);
+      form.append('prompt', currentPromptText);
+      form.append('api_key', apiKey);
 
-      const response = await axios.post(`${process.env.NEXT_PUBLIC_API_URL}/extract_data`, form, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
+      const isZip = isZipFile(selectedFile);
+      // Se for ZIP -> /extract-data-zip ; senão -> /extract_data
+      const endpoint = isZip
+        ? `${process.env.NEXT_PUBLIC_API_URL}/extract-data-zip`
+        : `${process.env.NEXT_PUBLIC_API_URL}/extract_data`;
+
+      const response = await axios.post(endpoint, form, {
+        headers: { Authorization: `Bearer ${token}` },
       });
 
       if (response.status === 200) {
         setResult(response.data);
         toast.success('Processamento concluído!', {
-          description: 'O arquivo foi analisado com sucesso'
+          description: isZip ? 'ZIP analisado com sucesso.' : 'Arquivo analisado com sucesso.'
         });
       } else {
         toast.error('Erro no processamento', {
@@ -201,9 +204,7 @@ export default function FileProcessorPage() {
   const copyToClipboard = () => {
     if (result) {
       navigator.clipboard.writeText(JSON.stringify(result, null, 2))
-      toast.success('JSON copiado!', {
-        description: 'O resultado foi copiado para a área de transferência'
-      })
+      toast.success('JSON copiado!', { description: 'O resultado foi copiado para a área de transferência' })
     }
   }
 
@@ -218,9 +219,7 @@ export default function FileProcessorPage() {
       a.click()
       document.body.removeChild(a)
       URL.revokeObjectURL(url)
-      toast.success('Download iniciado!', {
-        description: 'O arquivo JSON está sendo baixado'
-      })
+      toast.success('Download iniciado!', { description: 'O arquivo JSON está sendo baixado' })
     }
   }
 
@@ -231,9 +230,8 @@ export default function FileProcessorPage() {
   }
 
   const getFileIcon = (file: File) => {
-    if (file.type === 'application/pdf') {
-      return <FileText className="h-8 w-8 text-red-500" />
-    }
+    if (isZipFile(file)) return <FileText className="h-8 w-8 text-amber-500" />
+    if (file.type === 'application/pdf') return <FileText className="h-8 w-8 text-red-500" />
     return <Image className="h-8 w-8 text-blue-500" />
   }
 
@@ -246,12 +244,8 @@ export default function FileProcessorPage() {
   }
 
   async function handleSaveEditingPrompt() {
-    const promptKey =
-      prompts.find(p => p.id_prompt === selectedPrompt)?.chave ?? '';
-    const updatedData = {
-      chave: promptKey,
-      texto: currentPromptText
-    }
+    const promptKey = prompts.find(p => p.id_prompt === selectedPrompt)?.chave ?? '';
+    const updatedData = { chave: promptKey, texto: currentPromptText }
     try {
       await updatePrompt(selectedPrompt, updatedData);
       toast.success('Sucesso!', { description: 'Prompt atualizado com sucesso.' });
@@ -262,49 +256,39 @@ export default function FileProcessorPage() {
   }
 
   async function baixarCSV() {
-  try {
-    const csvString = await convertCSV(result);
-    console.log('CSV Gerado:', csvString);
-
-    // Forçar download do arquivo
-    const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    const url = URL.createObjectURL(blob);
-    
-    link.setAttribute('href', url);
-    link.setAttribute('download', 'dados_convertidos.csv');
-    link.style.visibility = 'hidden';
-    
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    
-    URL.revokeObjectURL(url);
-  } catch (error) {
-    console.error('Falha ao converter CSV:', error);
+    try {
+      const csvString = await convertCSV(result);
+      const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement('a');
+      const url = URL.createObjectURL(blob);
+      link.setAttribute('href', url);
+      link.setAttribute('download', 'dados_convertidos.csv');
+      link.style.visibility = 'hidden';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Falha ao converter CSV:', error);
+    }
   }
-}
 
-  if (loading) {
-    return <div>{null}</div>;
-  }
+  if (loading) return <div>{null}</div>;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 p-4">
       <div className="max-w-6xl mx-auto space-y-6">
-        {/* Header */}
         <Navbar />
         <div className="text-center space-y-2">
           <h1 className="text-4xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
             Processador de Arquivos
           </h1>
           <p className="text-slate-600 text-lg">
-            Faça upload de PDFs ou imagens e processe com IA
+            Faça upload de PDFs, imagens <span className="whitespace-nowrap">ou ZIP com múltiplos documentos</span> e processe com IA
           </p>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Upload Section */}
           <Card className="shadow-lg border-0 bg-white/80 backdrop-blur">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -312,42 +296,21 @@ export default function FileProcessorPage() {
                 Upload de Arquivo
               </CardTitle>
               <CardDescription>
-                Selecione um PDF ou imagem para processar
+                Selecione um PDF, imagem ou ZIP para processar
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              {/* Drop Zone */}
               <div
-                className={`border-2 border-dashed rounded-lg p-8 text-center transition-all duration-200 ${isDragOver
-                  ? 'border-blue-500 bg-blue-50'
-                  : 'border-slate-300 hover:border-slate-400'
-                  }`}
+                className={`border-2 border-dashed rounded-lg p-8 text-center transition-all duration-200 ${isDragOver ? 'border-blue-500 bg-blue-50' : 'border-slate-300 hover:border-slate-400'}`}
                 onDrop={handleDrop}
                 onDragOver={handleDragOver}
                 onDragLeave={handleDragLeave}
               >
                 <Upload className="h-12 w-12 text-slate-400 mx-auto mb-4" />
-                <p className="text-slate-600 mb-2">
-                  Arraste e solte um arquivo aqui 
-                </p>
-                {/* <label htmlFor="file-upload">
-                  <Button variant="outline" className="cursor-pointer">
-                    Selecionar arquivo
-                  </Button>
-                  <input
-                    id="file-upload"
-                    type="file"
-                    accept=".pdf,image/*"
-                    onChange={handleFileSelect}
-                    className="hidden"
-                  />
-                </label> */}
-                <p className="text-xs text-slate-500 mt-2">
-                  PDF, JPEG, PNG, TIFF, WebP (máx. 10MB)
-                </p>
+                <p className="text-slate-600 mb-2">Arraste e solte um arquivo aqui</p>
+                <p className="text-xs text-slate-500 mt-2">PDF, JPEG, PNG, TIFF, WebP (máx. 10MB) • ZIP (máx. 50MB)</p>
               </div>
 
-              {/* Selected File */}
               {selectedFile && (
                 <Card className="border border-green-200 bg-green-50">
                   <CardContent className="p-4">
@@ -355,20 +318,11 @@ export default function FileProcessorPage() {
                       <div className="flex items-center gap-3">
                         {getFileIcon(selectedFile)}
                         <div>
-                          <p className="font-medium text-green-800">
-                            {selectedFile.name}
-                          </p>
-                          <p className="text-sm text-green-600">
-                            {formatFileSize(selectedFile.size)}
-                          </p>
+                          <p className="font-medium text-green-800">{selectedFile.name}</p>
+                          <p className="text-sm text-green-600">{formatFileSize(selectedFile.size)}</p>
                         </div>
                       </div>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={removeFile}
-                        className="text-red-500 hover:text-red-700"
-                      >
+                      <Button variant="ghost" size="sm" onClick={removeFile} className="text-red-500 hover:text-red-700">
                         <X className="h-4 w-4" />
                       </Button>
                     </div>
@@ -378,28 +332,18 @@ export default function FileProcessorPage() {
             </CardContent>
           </Card>
 
-          {/* Prompt Selection */}
           <Card className="shadow-lg border-0 bg-white/80 backdrop-blur">
             <CardHeader>
               <CardTitle>Prompt</CardTitle>
-              <CardDescription>
-                Escolha o prompt referente ao tipo de arquivo que você está processando.
-              </CardDescription>
+              <CardDescription>Escolha o prompt referente ao tipo de arquivo que você está processando.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <Select
-                value={selectedPrompt?.toString()}
-                onValueChange={(value) => setSelectedPrompt(Number(value))}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Selecione um prompt" />
-                </SelectTrigger>
+              <Select value={selectedPrompt?.toString()} onValueChange={(value) => setSelectedPrompt(Number(value))}>
+                <SelectTrigger><SelectValue placeholder="Selecione um prompt" /></SelectTrigger>
                 <SelectContent>
                   {prompts.map((prompt) => (
                     <SelectItem key={prompt.id_prompt} value={prompt.id_prompt.toString()}>
-                      <div className="flex flex-col">
-                        <span className="font-medium">{prompt.chave}</span>
-                      </div>
+                      <div className="flex flex-col"><span className="font-medium">{prompt.chave}</span></div>
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -418,11 +362,8 @@ export default function FileProcessorPage() {
                     </CardContent>
                   </Card>
 
-                  {/* Editor de Prompt */}
                   <div className="space-y-3">
-                    <Label htmlFor="prompt-editor" className="text-sm font-medium">
-                      Editar Prompt
-                    </Label>
+                    <Label htmlFor="prompt-editor" className="text-sm font-medium">Editar Prompt</Label>
                     <Textarea
                       id="prompt-editor"
                       placeholder="Digite ou edite o prompt aqui..."
@@ -431,13 +372,8 @@ export default function FileProcessorPage() {
                       className="min-h-[120px] resize-none"
                     />
                     <div className="flex justify-end">
-                      <Button
-                        onClick={handleSaveEditingPrompt}
-                        disabled={!currentPromptText.trim()}
-                        className="flex items-center gap-2"
-                      >
-                        <Save className="h-4 w-4" />
-                        Salvar Prompt
+                      <Button onClick={handleSaveEditingPrompt} disabled={!currentPromptText.trim()} className="flex items-center gap-2">
+                        <Save className="h-4 w-4" />Salvar Prompt
                       </Button>
                     </div>
                   </div>
@@ -446,16 +382,10 @@ export default function FileProcessorPage() {
             </CardContent>
           </Card>
 
-          {/* API Key Input */}
           <Card className="shadow-lg border-0 bg-white/80 backdrop-blur">
             <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Key className="h-5 w-5" />
-                Chave da API
-              </CardTitle>
-              <CardDescription>
-                Insira sua chave de API para processar o arquivo. Suas informações são seguras e não são armazenadas.
-              </CardDescription>
+              <CardTitle className="flex items-center gap-2"><Key className="h-5 w-5" />Chave da API</CardTitle>
+              <CardDescription>Insira sua chave de API para processar o arquivo. Suas informações são seguras e não são armazenadas.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="relative">
@@ -467,18 +397,8 @@ export default function FileProcessorPage() {
                   className="pr-20"
                 />
                 <div className="absolute inset-y-0 right-0 flex items-center gap-1 pr-3">
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setShowApiKey(!showApiKey)}
-                    className="h-7 w-7 p-0"
-                  >
-                    {showApiKey ? (
-                      <EyeOff className="h-4 w-4" />
-                    ) : (
-                      <Eye className="h-4 w-4" />
-                    )}
+                  <Button type="button" variant="ghost" size="sm" onClick={() => setShowApiKey(!showApiKey)} className="h-7 w-7 p-0">
+                    {showApiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </Button>
                 </div>
               </div>
@@ -486,12 +406,9 @@ export default function FileProcessorPage() {
               {apiKey && (
                 <div className="flex items-center gap-2 text-sm">
                   <div className="flex items-center gap-1 text-green-600">
-                    <Check className="h-4 w-4" />
-                    <span>Chave inserida</span>
+                    <Check className="h-4 w-4" /><span>Chave inserida</span>
                   </div>
-                  <Badge variant="outline" className="text-xs">
-                    {apiKey.length} caracteres
-                  </Badge>
+                  <Badge variant="outline" className="text-xs">{apiKey.length} caracteres</Badge>
                 </div>
               )}
 
@@ -500,10 +417,7 @@ export default function FileProcessorPage() {
                   <Shield className="h-4 w-4 text-amber-600 mt-0.5 flex-shrink-0" />
                   <div className="text-xs text-amber-800">
                     <p className="font-medium mb-1">Segurança garantida</p>
-                    <p>
-                      Sua chave de API é processada localmente e não é armazenada
-                      em nossos servidores.
-                    </p>
+                    <p>Sua chave de API é processada localmente e não é armazenada em nossos servidores.</p>
                   </div>
                 </div>
               </div>
@@ -515,9 +429,7 @@ export default function FileProcessorPage() {
 
         <Button
           onClick={handleProcess}
-          disabled={
-            !selectedFile || !selectedPrompt || !apiKey || isProcessing
-          }
+          disabled={!selectedFile || !selectedPrompt || !apiKey || isProcessing}
           className="w-full bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700"
         >
           {isProcessing ? (
@@ -533,7 +445,6 @@ export default function FileProcessorPage() {
           )}
         </Button>
 
-        {/* Results Section */}
         {result && (
           <Card className="shadow-lg border-0 bg-white/80 backdrop-blur">
             <CardHeader>
@@ -543,37 +454,17 @@ export default function FileProcessorPage() {
                     <Check className="h-5 w-5 text-green-500" />
                     Resultado do Processamento
                   </CardTitle>
-                  <CardDescription>
-                    JSON com todas as informações extraídas
-                  </CardDescription>
+                  <CardDescription>JSON com todas as informações extraídas</CardDescription>
                 </div>
                 <div className="flex gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={copyToClipboard}
-                    className="flex items-center gap-2"
-                  >
-                    <Copy className="h-4 w-4" />
-                    Copiar
+                  <Button variant="outline" size="sm" onClick={copyToClipboard} className="flex items-center gap-2">
+                    <Copy className="h-4 w-4" />Copiar
                   </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={downloadJson}
-                    className="flex items-center gap-2"
-                  >
-                    <Download className="h-4 w-4" />
-                    Baixar
+                  <Button variant="outline" size="sm" onClick={downloadJson} className="flex items-center gap-2">
+                    <Download className="h-4 w-4" />Baixar
                   </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={baixarCSV}
-                    className="flex items-center gap-2"
-                  >
-                    <Download className="h-4 w-4" />
-                    Baixar CSV
+                  <Button variant="outline" size="sm" onClick={baixarCSV} className="flex items-center gap-2">
+                    <Download className="h-4 w-4" />Baixar CSV
                   </Button>
                 </div>
               </div>
@@ -590,5 +481,4 @@ export default function FileProcessorPage() {
       </div>
     </div>
   );
-
 }
