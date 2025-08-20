@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useCallback, useEffect } from 'react'
+import React, { useState, useCallback, useEffect, useRef } from 'react'
 import { Upload, Download, Copy, FileText, Image, Check, X, Key, Eye, EyeOff, Shield, Save } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -34,6 +34,14 @@ export default function FileProcessorPage() {
   const [loading, setLoading] = useState(true);
   const router = useRouter();
   const [currentPromptText, setCurrentPromptText] = useState<string>("")
+  const [taskId, setTaskId] = useState<string | null>(null)
+  const [zipProgress, setZipProgress] = useState<{
+    processed: number
+    total: number
+    done: boolean
+    error?: string | null
+  } | null>(null)
+  const progressTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   useEffect(() => {
     const verifyToken = async () => {
@@ -56,7 +64,7 @@ export default function FileProcessorPage() {
 
   useEffect(() => {
     const fetchPrompts = async () => {
-      if(loading === true) return;
+      if (loading === true) return;
       try {
         const response = await axios.get(`${process.env.NEXT_PUBLIC_API_URL}/prompts_read_list`, {
           headers: {
@@ -88,6 +96,24 @@ export default function FileProcessorPage() {
     }
   }, [selectedPrompt, prompts])
 
+  useEffect(() => {
+    return () => {
+      if (progressTimerRef.current) {
+        clearInterval(progressTimerRef.current)
+        progressTimerRef.current = null
+      }
+    }
+  }, [])
+
+  const isZipFile = (file: File) => {
+    const t = (file.type || '').toLowerCase()
+    return (
+      t === 'application/zip' ||
+      t === 'application/x-zip-compressed' ||
+      file.name.toLowerCase().endsWith('.zip')
+    )
+  }
+
   // Função para lidar com arquivos selecionados via input
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
@@ -118,26 +144,38 @@ export default function FileProcessorPage() {
       'image/webp',
       'image/tiff',
       'image/tif',
-      'application/msword',                    // Para arquivos .doc
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document'  // Para arquivos .docx
+      'application/msword',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      // ZIPs:
+      'application/zip',
+      'application/x-zip-compressed',
     ]
 
-    if (!validTypes.includes(file.type)) {
+    const isZip = isZipFile(file)
+    const isKnownType = validTypes.includes(file.type) || isZip
+
+    if (!isKnownType) {
       toast.error('Tipo de arquivo não suportado', {
-        description: 'Por favor, selecione um PDF ou uma imagem (JPEG, PNG, GIF, WebP)'
+        description: 'Use PDF, imagem (JPEG/PNG/GIF/WebP/TIFF) ou ZIP',
       })
       return
     }
 
-    if (file.size > 10 * 1024 * 1024) { // 10MB
+    // Limite de tamanho (mantém 10MB p/ arquivos simples; dá folga maior p/ ZIP)
+    const maxBytes = isZip ? 200 * 1024 * 1024 : 10 * 1024 * 1024
+    if (file.size > maxBytes) {
       toast.error('Arquivo muito grande', {
-        description: 'O arquivo deve ter no máximo 10MB'
+        description: isZip
+          ? 'O ZIP pode ter no máximo 200MB'
+          : 'O arquivo deve ter no máximo 10MB',
       })
       return
     }
 
     setSelectedFile(file)
     setResult(null)
+    setZipProgress(null)
+    setTaskId(null)
     toast.success('Arquivo carregado com sucesso!')
   }
 
@@ -152,51 +190,167 @@ export default function FileProcessorPage() {
   }, [])
 
   const handleProcess = async () => {
-    const token = localStorage.getItem('token');
+  const token = localStorage.getItem('token')
+  if (!selectedFile || !selectedPrompt || !apiKey) {
+    toast.error('Dados incompletos', {
+      description: 'Selecione um arquivo, um prompt e informe a chave de API.',
+    })
+    return
+  }
 
-    if (!selectedFile || !selectedPrompt || !apiKey) {
-      toast.error('Dados incompletos', {
-        description: 'Selecione um arquivo, um prompt e informe a chave de API.'
-      });
-      return;
-    }
+  // evita múltiplos pollings
+  if (progressTimerRef.current) {
+    clearInterval(progressTimerRef.current)
+    progressTimerRef.current = null
+  }
 
-    setIsProcessing(true);
+  setIsProcessing(true)
+  setResult(null)
 
-    try {
-      // Monta o multipart/form-data
-      const form = new FormData();
-      form.append('file', selectedFile);         // File ou Blob vindo do <input type="file">
-      form.append('prompt', currentPromptText);         // string
-      form.append('api_key', apiKey);            // string
+  const form = new FormData()
+  form.append('file', selectedFile)
+  form.append('prompt', currentPromptText)
+  form.append('api_key', apiKey)
 
-      const response = await axios.post(`${process.env.NEXT_PUBLIC_API_URL}/extract_data`, form, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
+  try {
+    // === ZIP com contador ===
+    if (isZipFile(selectedFile)) {
+      const start = await axios.post(
+        `${process.env.NEXT_PUBLIC_API_URL}/extract-zip/start`,
+        form,
+        { headers: { Authorization: `Bearer ${token}` } }
+      )
 
-      if (response.status === 200) {
-        setResult(response.data);
-        toast.success('Processamento concluído!', {
-          description: 'O arquivo foi analisado com sucesso'
-        });
-      } else {
-        toast.error('Erro no processamento', {
-          description: `Resposta inesperada (${response.status}).`
-        });
+      const { task_id, total } = start.data
+      setTaskId(task_id)
+      setZipProgress({ processed: 0, total, done: false })
+
+      // ⚠️ se não houver arquivos úteis, finalize cedo
+      if (!total || total <= 0) {
+        setIsProcessing(false)
+        toast.info('ZIP sem arquivos processáveis', {
+          description: 'Nenhum arquivo válido encontrado no ZIP.',
+        })
+        return
       }
-    } catch (err: any) {
-      const desc =
-        err?.response?.data?.message ||
-        err?.response?.data ||
-        err?.message ||
-        'Ocorreu um erro ao processar o arquivo. Tente novamente.';
-      toast.error('Erro no processamento', { description: String(desc) });
-    } finally {
-      setIsProcessing(false);
+
+      const stopPolling = () => {
+        if (progressTimerRef.current) {
+          clearInterval(progressTimerRef.current)
+          progressTimerRef.current = null
+        }
+      }
+
+      const fetchResult = async (attempt = 0) => {
+        try {
+          const r = await axios.get(
+            `${process.env.NEXT_PUBLIC_API_URL}/extract/result/${task_id}`,
+            { headers: { Authorization: `Bearer ${token}` } }
+          )
+          if (r.status === 200) {
+            setResult(r.data)
+            setIsProcessing(false)
+            toast.success('Processamento concluído!', {
+              description: 'ZIP processado com sucesso',
+            })
+            return
+          }
+          // 202 = ainda montando resposta
+          if (attempt < 30) {
+            setTimeout(() => fetchResult(attempt + 1), 1000)
+          } else {
+            setIsProcessing(false)
+            toast.info('Resultado ainda não disponível', {
+              description: 'Tente novamente em alguns segundos.',
+            })
+          }
+        } catch (err: any) {
+          // Backend novo não deve retornar 404, mas se retornar, trate como "tente de novo"
+          const status = err?.response?.status
+          if ((status === 404 || status === 202) && attempt < 30) {
+            setTimeout(() => fetchResult(attempt + 1), 1000)
+          } else {
+            setIsProcessing(false)
+            toast.error('Falha ao buscar resultado', {
+              description:
+                err?.response?.data?.detail || err?.message || 'Erro desconhecido',
+            })
+          }
+        }
+      }
+
+      const poll = async () => {
+        try {
+          const res = await axios.get(
+            `${process.env.NEXT_PUBLIC_API_URL}/extract-zip/progress/${task_id}`,
+            { headers: { Authorization: `Bearer ${token}` } }
+          )
+          setZipProgress(res.data)
+
+          const { done, error, processed, total: t } = res.data || {}
+
+          // ✅ finalize se: erro, done=true, ou processed >= total
+          if (error || done || (typeof processed === 'number' && typeof t === 'number' && processed >= t)) {
+            stopPolling()
+
+            if (error) {
+              setIsProcessing(false)
+              toast.error('Erro no processamento', { description: String(error) })
+              return
+            }
+
+            // Busca o resultado consolidado
+            fetchResult()
+          }
+        } catch (err: any) {
+          stopPolling()
+          setIsProcessing(false)
+          toast.error('Erro ao consultar progresso', {
+            description:
+              err?.response?.data?.detail || err?.message || 'Erro desconhecido',
+          })
+        }
+      }
+
+      // inicia polling a cada 1s
+      progressTimerRef.current = setInterval(poll, 1000)
+      // dispara logo a primeira
+      poll()
+      return
     }
-  };
+
+    // === Arquivo único (fluxo antigo) ===
+    const response = await axios.post(
+      `${process.env.NEXT_PUBLIC_API_URL}/extract_data`,
+      form,
+      { headers: { Authorization: `Bearer ${token}` } }
+    )
+
+    if (response.status === 200) {
+      setResult(response.data)
+      toast.success('Processamento concluído!', {
+        description: 'O arquivo foi analisado com sucesso',
+      })
+    } else {
+      toast.error('Erro no processamento', {
+        description: `Resposta inesperada (${response.status}).`,
+      })
+    }
+  } catch (err: any) {
+    const desc =
+      err?.response?.data?.message ||
+      err?.response?.data?.detail ||
+      err?.response?.data ||
+      err?.message ||
+      'Ocorreu um erro ao processar o arquivo. Tente novamente.'
+    toast.error('Erro no processamento', { description: String(desc) })
+  } finally {
+    // no ZIP, quem desliga é o fetchResult / erros do polling
+    if (!isZipFile(selectedFile)) setIsProcessing(false)
+  }
+}
+
+
 
   const copyToClipboard = () => {
     if (result) {
@@ -231,6 +385,9 @@ export default function FileProcessorPage() {
   }
 
   const getFileIcon = (file: File) => {
+    if (isZipFile(file)) {
+      return <FileText className="h-8 w-8 text-amber-500" />
+    }
     if (file.type === 'application/pdf') {
       return <FileText className="h-8 w-8 text-red-500" />
     }
@@ -262,28 +419,28 @@ export default function FileProcessorPage() {
   }
 
   async function baixarCSV() {
-  try {
-    const csvString = await convertCSV(result);
-    console.log('CSV Gerado:', csvString);
+    try {
+      const csvString = await convertCSV(result);
+      console.log('CSV Gerado:', csvString);
 
-    // Forçar download do arquivo
-    const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    const url = URL.createObjectURL(blob);
-    
-    link.setAttribute('href', url);
-    link.setAttribute('download', 'dados_convertidos.csv');
-    link.style.visibility = 'hidden';
-    
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    
-    URL.revokeObjectURL(url);
-  } catch (error) {
-    console.error('Falha ao converter CSV:', error);
+      // Forçar download do arquivo
+      const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement('a');
+      const url = URL.createObjectURL(blob);
+
+      link.setAttribute('href', url);
+      link.setAttribute('download', 'dados_convertidos.csv');
+      link.style.visibility = 'hidden';
+
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Falha ao converter CSV:', error);
+    }
   }
-}
 
   if (loading) {
     return <div>{null}</div>;
@@ -328,7 +485,7 @@ export default function FileProcessorPage() {
               >
                 <Upload className="h-12 w-12 text-slate-400 mx-auto mb-4" />
                 <p className="text-slate-600 mb-2">
-                  Arraste e solte um arquivo aqui 
+                  Arraste e solte um arquivo aqui
                 </p>
                 {/* <label htmlFor="file-upload">
                   <Button variant="outline" className="cursor-pointer">
@@ -343,7 +500,7 @@ export default function FileProcessorPage() {
                   />
                 </label> */}
                 <p className="text-xs text-slate-500 mt-2">
-                  PDF, JPEG, PNG, TIFF, WebP (máx. 10MB)
+                  PDF, JPEG, PNG, TIFF, ZIP (máx. 10MB; ZIP até 200MB)
                 </p>
               </div>
 
@@ -532,6 +689,32 @@ export default function FileProcessorPage() {
             </>
           )}
         </Button>
+
+        {isProcessing && zipProgress && (
+          <div className="w-full mt-3">
+            <div className="flex items-center justify-between text-sm text-slate-600 mb-1">
+              <span>Processando ZIP…</span>
+              <span>
+                {zipProgress.processed} / {zipProgress.total}
+              </span>
+            </div>
+            <div className="w-full h-2 rounded bg-slate-200 overflow-hidden">
+              <div
+                className="h-2 bg-gradient-to-r from-blue-600 to-purple-600 transition-all"
+                style={{
+                  width: `${zipProgress.total > 0
+                      ? Math.min(100, Math.floor((zipProgress.processed / zipProgress.total) * 100))
+                      : 0
+                    }%`,
+                }}
+              />
+            </div>
+            {zipProgress.error && (
+              <p className="text-red-600 text-sm mt-2">Erro: {zipProgress.error}</p>
+            )}
+          </div>
+        )}
+
 
         {/* Results Section */}
         {result && (
