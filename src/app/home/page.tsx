@@ -263,9 +263,12 @@ export default function FileProcessorPage() {
 
       const d = await res.json();
       setStatus(d.status);
-      setProcessed(d.processed ?? 0);
-      setTotal(d.total ?? 0);
-      setPercent(d.percent ?? 0);
+      const proc = Number(d.processed ?? 0);
+      const tot = Number(d.total ?? 0);
+      setProcessed(proc);
+      setTotal(tot);
+      const pct = tot > 0 ? Math.round((proc / tot) * 100) : 0;
+      setPercent(pct);
 
       if (d.status === 'done') {
         // pega o resultado final
