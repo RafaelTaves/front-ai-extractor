@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useCallback, useEffect } from 'react'
+import React, { useState, useCallback, useEffect, useRef } from 'react'
 import { Upload, Download, Copy, FileText, Image, Check, X, Key, Eye, EyeOff, Shield, Save } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -34,6 +34,12 @@ export default function FileProcessorPage() {
   const [loading, setLoading] = useState(true);
   const router = useRouter();
   const [currentPromptText, setCurrentPromptText] = useState<string>("")
+  const [taskId, setTaskId] = useState<string | null>(null);
+  const [percent, setPercent] = useState(0);
+  const [status, setStatus] = useState<"idle" | "queued" | "running" | "done" | "error">("idle");
+  const [processed, setProcessed] = useState(0);
+  const [total, setTotal] = useState(0);
+  const pollRef = useRef<number | null>(null);
 
   useEffect(() => {
     const verifyToken = async () => {
@@ -77,6 +83,22 @@ export default function FileProcessorPage() {
       setCurrentPromptText("")
     }
   }, [selectedPrompt, prompts])
+
+  useEffect(() => {
+    const token = localStorage.getItem('token') || '';
+    if (!taskId) return;
+
+    // Inicia polling a cada 1s
+    pollRef.current = window.setInterval(() => pollProgress(token), 1000);
+
+    return () => {
+      if (pollRef.current) {
+        window.clearInterval(pollRef.current);
+        pollRef.current = null;
+      }
+    };
+  }, [taskId]);
+
 
   const isZipFile = (file: File) => {
     const type = (file.type || '').toLowerCase();
@@ -161,6 +183,10 @@ export default function FileProcessorPage() {
       return;
     }
 
+    const isZip = isZipFile(selectedFile);
+
+    // estados iniciais comuns
+    setResult(null);
     setIsProcessing(true);
 
     try {
@@ -169,24 +195,38 @@ export default function FileProcessorPage() {
       form.append('prompt', currentPromptText);
       form.append('api_key', apiKey);
 
-      const isZip = isZipFile(selectedFile);
-      // Se for ZIP -> /extract-data-zip ; senão -> /extract_data
-      const endpoint = isZip
-        ? `${process.env.NEXT_PUBLIC_API_URL}/extract-data-zip`
-        : `${process.env.NEXT_PUBLIC_API_URL}/extract_data`;
+      if (isZip) {
+        // NOVO: inicia tarefa e ativa polling de progresso
+        const startUrl = `${process.env.NEXT_PUBLIC_API_URL}/extract-zip/start`;
+        const { data, status } = await axios.post(startUrl, form, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
 
-      const response = await axios.post(endpoint, form, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+        if (status !== 200 || !data?.task_id) {
+          throw new Error('Falha ao iniciar processamento do ZIP');
+        }
 
-      if (response.status === 200) {
+        setTaskId(data.task_id);
+        setStatus('queued');
+        setPercent(0);
+        setProcessed(0);
+        setTotal(0);
+
+        toast.success('Processamento iniciado!', {
+          description: 'Acompanhe o progresso abaixo.'
+        });
+
+        // Não finalize aqui. O resultado virá via polling.
+        return;
+      } else {
+        // Fluxo antigo para 1 arquivo
+        const endpoint = `${process.env.NEXT_PUBLIC_API_URL}/extract_data`;
+        const response = await axios.post(endpoint, form, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
         setResult(response.data);
         toast.success('Processamento concluído!', {
-          description: isZip ? 'ZIP analisado com sucesso.' : 'Arquivo analisado com sucesso.'
-        });
-      } else {
-        toast.error('Erro no processamento', {
-          description: `Resposta inesperada (${response.status}).`
+          description: 'Arquivo analisado com sucesso.'
         });
       }
     } catch (err: any) {
@@ -197,9 +237,60 @@ export default function FileProcessorPage() {
         'Ocorreu um erro ao processar o arquivo. Tente novamente.';
       toast.error('Erro no processamento', { description: String(desc) });
     } finally {
-      setIsProcessing(false);
+      // Para ZIP, quem desliga o "Processando..." é o polling ao finalizar.
+      const isZip = selectedFile && isZipFile(selectedFile);
+      if (!isZip) setIsProcessing(false);
     }
   };
+
+
+  const pollProgress = async (token: string) => {
+    if (!taskId) return;
+
+    try {
+      const progUrl = `${process.env.NEXT_PUBLIC_API_URL}/extract-zip/progress/${taskId}`;
+      const res = await fetch(progUrl, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+
+      if (!res.ok) {
+        // se a task sumiu, encerre polling
+        if (pollRef.current) window.clearInterval(pollRef.current);
+        setIsProcessing(false);
+        toast.error('Progresso indisponível', { description: 'Tarefa não encontrada.' });
+        return;
+      }
+
+      const d = await res.json();
+      setStatus(d.status);
+      setProcessed(d.processed ?? 0);
+      setTotal(d.total ?? 0);
+      setPercent(d.percent ?? 0);
+
+      if (d.status === 'done') {
+        // pega o resultado final
+        const resultUrl = `${process.env.NEXT_PUBLIC_API_URL}/extract-zip/result/${taskId}`;
+        const r = await fetch(resultUrl, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        const finalJson = await r.json();
+        setResult(finalJson);
+        setIsProcessing(false);
+        setTaskId(null);
+        if (pollRef.current) window.clearInterval(pollRef.current);
+        toast.success('Processamento concluído!', { description: 'ZIP analisado com sucesso.' });
+      } else if (d.status === 'error') {
+        setIsProcessing(false);
+        setTaskId(null);
+        if (pollRef.current) window.clearInterval(pollRef.current);
+        toast.error('Falha no processamento', { description: d.error || 'Erro desconhecido' });
+      }
+    } catch (e: any) {
+      // erro de rede/etc – mantém polling por mais algumas tentativas
+      console.error('poll error', e);
+    }
+  };
+
 
   const copyToClipboard = () => {
     if (result) {
@@ -444,6 +535,27 @@ export default function FileProcessorPage() {
             </>
           )}
         </Button>
+
+        {(status === 'queued' || status === 'running') && (
+          <div className="w-full">
+            <div className="mt-4 bg-slate-200 rounded-full h-3 overflow-hidden">
+              <div
+                className="h-3 bg-gradient-to-r from-blue-600 to-purple-600 transition-all"
+                style={{ width: `${percent}%` }}
+              />
+            </div>
+            <div className="mt-2 flex items-center justify-between text-sm text-slate-700">
+              <span>Status: {status}</span>
+              <span>{processed}/{total} ({percent}%)</span>
+            </div>
+          </div>
+        )}
+        {status === 'error' && (
+          <div className="mt-3 text-sm text-red-600">
+            Ocorreu um erro durante o processamento do ZIP.
+          </div>
+        )}
+
 
         {result && (
           <Card className="shadow-lg border-0 bg-white/80 backdrop-blur">
