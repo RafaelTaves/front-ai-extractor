@@ -26,7 +26,7 @@ export default function FileProcessorPage() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [prompts, setPrompts] = useState<Prompt[]>([])
   const [selectedPrompt, setSelectedPrompt] = useState<number>(0)
-  const [apiKey, setApiKey] = useState<string>(process.env.NEXT_PUBLIC_API_KEY || '')
+  const [apiKey, setApiKey] = useState<string>('')
   const [showApiKey, setShowApiKey] = useState(false)
   const [isProcessing, setIsProcessing] = useState(false)
   const [result, setResult] = useState<any>(null)
@@ -73,6 +73,8 @@ export default function FileProcessorPage() {
       }
     };
     fetchPrompts();
+    const apiKey = localStorage.getItem('api_key');
+    if (apiKey) setApiKey(apiKey);
   }, [loading]);
 
   useEffect(() => {
@@ -141,8 +143,8 @@ export default function FileProcessorPage() {
       'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
     ])
 
-    // tamanho máximo (10MB docs/imagens; 50MB ZIP)
-    const maxSize = isZip ? 50 * 1024 * 1024 : 10 * 1024 * 1024
+    // tamanho máximo (10MB docs/imagens; 1000MB ZIP)
+    const maxSize = isZip ? 1000 * 1024 * 1024 : 20 * 1024 * 1024
 
     if (!isZip && !validDocTypes.has(file.type)) {
       toast.error('Tipo de arquivo não suportado', {
@@ -153,7 +155,7 @@ export default function FileProcessorPage() {
 
     if (file.size > maxSize) {
       toast.error('Arquivo muito grande', {
-        description: isZip ? 'ZIP deve ter no máximo 50MB' : 'Documento deve ter no máximo 10MB'
+        description: isZip ? 'ZIP deve ter no máximo 1000MB' : 'Documento deve ter no máximo 20MB'
       })
       return
     }
@@ -402,7 +404,7 @@ export default function FileProcessorPage() {
               >
                 <Upload className="h-12 w-12 text-slate-400 mx-auto mb-4" />
                 <p className="text-slate-600 mb-2">Arraste e solte um arquivo aqui</p>
-                <p className="text-xs text-slate-500 mt-2">PDF, JPEG, PNG, TIFF, WebP (máx. 10MB) • ZIP (máx. 50MB)</p>
+                <p className="text-xs text-slate-500 mt-2">PDF, JPEG, PNG, TIFF, WebP (máx. 20MB) • ZIP (máx. 1000MB)</p>
               </div>
 
               {selectedFile && (

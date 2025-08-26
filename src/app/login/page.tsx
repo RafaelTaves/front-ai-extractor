@@ -47,6 +47,7 @@ export default function Login() {
       }
 
       localStorage.setItem("token", response.data.access_token);
+      localStorage.setItem("api_key", response.data.api_key);
 
       toast.success("Login realizado!", {
         description: "Redirecionando para seleção de local...",
