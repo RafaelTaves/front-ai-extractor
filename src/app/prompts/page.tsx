@@ -127,7 +127,7 @@ const PromptsPage: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 p-4">
-        <Navbar />
+      <Navbar/>
       <Head>
         <title>Gerenciamento de Prompts</title>
       </Head>

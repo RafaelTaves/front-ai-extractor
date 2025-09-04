@@ -18,6 +18,7 @@ const Navbar: React.FC<NavbarProps> = () => {
   const navLinks = [
     { name: 'Home', href: '/home' },
     { name: 'Prompts', href: '/prompts' },
+    { name: 'Image to Docx', href: '/image-docx' },
   ];
 
   async function handleLogout() {

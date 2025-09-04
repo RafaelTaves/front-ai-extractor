@@ -66,3 +66,20 @@ export const convertCSV = async (jsonData: object | object[]): Promise<string> =
     throw error;
   }
 };
+
+export const imageToDocx = async (imageFile: File, apiKey: string): Promise<Blob> => {
+  const formData = new FormData();
+  formData.append('file', imageFile);       // <— nome do campo correto
+  formData.append('api_key', apiKey);
+
+  const resp = await api.post('/image-to-docx', formData, {
+    responseType: 'blob',
+    headers: { 'Content-Type': 'multipart/form-data' },
+  });
+
+  if (resp.status !== 200) {
+    throw new Error('Erro na conversão da imagem para Docx');
+  }
+
+  return resp.data as Blob; // resp.data é o Blob
+};
