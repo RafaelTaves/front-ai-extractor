@@ -67,10 +67,11 @@ export const convertCSV = async (jsonData: object | object[]): Promise<string> =
   }
 };
 
-export const imageToDocx = async (imageFile: File, apiKey: string): Promise<Blob> => {
+export const imageToDocx = async (imageFile: File, apiKey: string, user_prompt: string): Promise<Blob> => {
   const formData = new FormData();
   formData.append('file', imageFile);       // <— nome do campo correto
   formData.append('api_key', apiKey);
+  formData.append('user_prompt', user_prompt);
 
   const resp = await api.post('/image-to-docx', formData, {
     responseType: 'blob',

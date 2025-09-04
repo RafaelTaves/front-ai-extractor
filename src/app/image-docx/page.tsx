@@ -11,6 +11,8 @@ import { useCallback, useEffect, useState } from "react";
 import { toast } from 'sonner'
 import { Separator } from "@/components/ui/separator";
 import { imageToDocx } from "@/lib/api";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 
 export default function ImageDocxPage() {
     const [isDragOver, setIsDragOver] = useState(false)
@@ -19,6 +21,7 @@ export default function ImageDocxPage() {
     const [isProcessing, setIsProcessing] = useState(false)
     const [apiKey, setApiKey] = useState<string>('')
     const [showApiKey, setShowApiKey] = useState(false)
+    const [userPrompt, setUserPrompt] = useState('Você é um OCR de alta qualidade. Extraia TODO o texto visível **sem resumir**, mantendo a ordem de leitura natural e **quebras de linha**. Não adicione comentários ou formatação extra.')
     const [loading, setLoading] = useState(true)
     const router = useRouter();
 
@@ -66,6 +69,7 @@ export default function ImageDocxPage() {
             'image/webp',
             'image/tiff',
             'image/tif',
+            'application/pdf',
         ])
 
         // tamanho máximo (10MB docs/imagens; 1000MB ZIP)
@@ -110,7 +114,7 @@ export default function ImageDocxPage() {
         try {
             setIsProcessing(true);
             // chama sua função de API que retorna um Blob
-            const blob = await imageToDocx(selectedFile, apiKey);
+            const blob = await imageToDocx(selectedFile, apiKey, userPrompt);
 
             // cria URL temporária e dispara download
             const url = URL.createObjectURL(blob);
@@ -169,7 +173,7 @@ export default function ImageDocxPage() {
                             >
                                 <Upload className="h-12 w-12 text-slate-400 mx-auto mb-4" />
                                 <p className="text-slate-600 mb-2">Arraste e solte um arquivo aqui</p>
-                                <p className="text-xs text-slate-500 mt-2">JPEG, PNG, TIFF, WebP (máx. 30MB)</p>
+                                <p className="text-xs text-slate-500 mt-2">JPEG, PNG, TIFF, Pdf, WebP (máx. 30MB)</p>
                             </div>
 
                             {selectedFile && (
@@ -190,6 +194,46 @@ export default function ImageDocxPage() {
                                     </CardContent>
                                 </Card>
                             )}
+                        </CardContent>
+                    </Card>
+
+                    <Card className="shadow-lg border-0 bg-white/80 backdrop-blur">
+                        <CardHeader>
+                            <CardTitle>Prompt</CardTitle>
+                            <CardDescription>Personalize seu prompt (recomendado utilizar o já escrito).</CardDescription>
+                        </CardHeader>
+                        <CardContent className="space-y-4">
+                            <>
+                                <div className="space-y-3">
+                                    <Label htmlFor="prompt-editor" className="text-sm font-medium">Editar Prompt</Label>
+                                    <Textarea
+                                        id="prompt-editor"
+                                        placeholder="Digite ou edite o prompt aqui..."
+                                        value={userPrompt}
+                                        onChange={(e) => setUserPrompt(e.target.value)}
+                                        className="min-h-[120px] resize-none"
+                                    />
+                                    <div className="flex justify-end">
+                                        <Button
+                                            onClick={handleProcess}
+                                            disabled={!selectedFile || !apiKey || isProcessing}
+                                            className="w-full bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700"
+                                        >
+                                            {isProcessing ? (
+                                                <>
+                                                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2" />
+                                                    Processando...
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <Upload className="mr-2 h-4 w-4" />
+                                                    Processar Arquivo
+                                                </>
+                                            )}
+                                        </Button>
+                                    </div>
+                                </div>
+                            </>
                         </CardContent>
                     </Card>
 
@@ -232,23 +276,6 @@ export default function ImageDocxPage() {
                                     </div>
                                 </div>
                             </div>
-                            <Button
-                                onClick={handleProcess}
-                                disabled={!selectedFile || !apiKey || isProcessing}
-                                className="w-full bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700"
-                            >
-                                {isProcessing ? (
-                                    <>
-                                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2" />
-                                        Processando...
-                                    </>
-                                ) : (
-                                    <>
-                                        <Upload className="mr-2 h-4 w-4" />
-                                        Processar Arquivo
-                                    </>
-                                )}
-                            </Button>
                         </CardContent>
                     </Card>
                 </div>
