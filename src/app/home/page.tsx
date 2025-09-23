@@ -465,7 +465,7 @@ export default function FileProcessorPage() {
                       placeholder="Digite ou edite o prompt aqui..."
                       value={currentPromptText}
                       onChange={(e) => setCurrentPromptText(e.target.value)}
-                      className="min-h-[120px] resize-none"
+                      className="min-h-[120px] max-h-[150px] resize-none"
                     />
                     <div className="flex justify-end">
                       <Button onClick={handleSaveEditingPrompt} disabled={!currentPromptText.trim()} className="flex items-center gap-2">
