@@ -13,7 +13,7 @@ import { Input } from '@/components/ui/input'
 import { useRouter } from 'next/navigation';
 import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
-import { convertCSV, updatePrompt } from '@/lib/api'
+import { convertCSV, convertINSERT, updatePrompt } from '@/lib/api'
 import Navbar from '@/components/Navbar'
 
 interface Prompt {
@@ -369,6 +369,24 @@ export default function FileProcessorPage() {
     }
   }
 
+  async function baixarINSERT() {
+    try {
+      const csvString = await convertINSERT(result);
+      const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement('a');
+      const url = URL.createObjectURL(blob);
+      link.setAttribute('href', url);
+      link.setAttribute('download', 'dados_convertidos.csv');
+      link.style.visibility = 'hidden';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Falha ao converter CSV:', error);
+    }
+  }
+
   if (loading) return <div>{null}</div>;
 
   return (
@@ -582,6 +600,9 @@ export default function FileProcessorPage() {
                   </Button>
                   <Button variant="outline" size="sm" onClick={baixarCSV} className="flex items-center gap-2">
                     <Download className="h-4 w-4" />Baixar CSV
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={baixarINSERT} className="flex items-center gap-2">
+                    <Download className="h-4 w-4" />Baixar INSERT
                   </Button>
                 </div>
               </div>

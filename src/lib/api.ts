@@ -84,3 +84,19 @@ export const imageToDocx = async (imageFile: File, apiKey: string, user_prompt: 
 
   return resp.data as Blob; // resp.data é o Blob
 };
+
+export const convertINSERT = async (jsonData: object | object[]): Promise<string> => {
+  try {
+    const { data } = await api.post<string>('/json-to-sql', jsonData, {
+      responseType: 'text',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+
+    return data;
+  } catch (error) {
+    console.error('Erro ao converter JSON para SQL:', error);
+    throw error;
+  }
+};
