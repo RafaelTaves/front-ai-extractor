@@ -371,19 +371,16 @@ export default function FileProcessorPage() {
 
   async function baixarINSERT() {
     try {
-      const csvString = await convertINSERT(result);
-      const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' });
-      const link = document.createElement('a');
-      const url = URL.createObjectURL(blob);
-      link.setAttribute('href', url);
-      link.setAttribute('download', 'dados_convertidos.csv');
-      link.style.visibility = 'hidden';
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
+      const sqlContent = await convertINSERT(result);
+      const blob = new Blob([sqlContent], { type: 'text/plain' });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `comandos_sql_${new Date().getTime()}.txt`;
+      a.click();
+      window.URL.revokeObjectURL(url);
     } catch (error) {
-      console.error('Falha ao converter CSV:', error);
+      console.error('Falha ao converter TXT:', error);
     }
   }
 
